@@ -1,849 +1,907 @@
-import React, { useState, useEffect, useRef } from 'react';
-
-// Web Audio API를 활용한 효과음 및 배경음 생성기 (싱글톤)
-class SoundManager {
-  constructor() {
-    this.ctx = null;
-    this.bgmInterval = null;
-    this.isMuted = false;
-    this.bgmStep = 0;
-    this.chords = [
-      [130.81, 164.81, 196.00, 246.94], // Cmaj7 (C3, E3, G3, B3)
-      [174.61, 220.00, 261.63, 329.63], // Fmaj7 (F3, A3, C4, E4)
-      [196.00, 246.94, 293.66, 329.63], // G6 (G3, B3, D4, E4)
-      [130.81, 164.81, 196.00, 246.94], // Cmaj7
-    ];
-  }
-
-  init() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-  }
-
-  playTone(freq, type, duration, startTime, vol) {
-    if (this.isMuted || !this.ctx) return;
-    try {
-      const osc = this.ctx.createOscillator();
-      const gainNode = this.ctx.createGain();
-      osc.connect(gainNode);
-      gainNode.connect(this.ctx.destination);
-
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, startTime);
-
-      // 부드러운 볼륨 엔벨로프 (ADSR 모방)
-      gainNode.gain.setValueAtTime(0, startTime);
-      gainNode.gain.linearRampToValueAtTime(vol, startTime + 0.05);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-    } catch (e) {
-      console.warn("오디오 재생 오류:", e);
-    }
-  }
-
-  startBGM() {
-    this.init();
-    if (this.bgmInterval) clearInterval(this.bgmInterval);
-    
-    this.bgmInterval = setInterval(() => {
-      if (this.isMuted || !this.ctx || this.ctx.state === 'suspended') return;
-
-      const chord = this.chords[this.bgmStep % this.chords.length];
-      const now = this.ctx.currentTime;
-
-      // 부드러운 패드 스타일 반주음 (낮은 대역)
-      chord.forEach((freq, idx) => {
-        this.playTone(freq, 'triangle', 2.8, now + idx * 0.15, 0.02);
-      });
-
-      // 잔잔하고 예쁜 높은 벨 멜로디 랜덤 연주
-      if (this.bgmStep % 2 === 0) {
-        const melody = [523.25, 587.33, 659.25, 783.99, 880.00]; // C5, D5, E5, G5, A5
-        const note = melody[Math.floor(Math.random() * melody.length)];
-        this.playTone(note, 'sine', 1.8, now + 0.8, 0.015);
-      }
-
-      this.bgmStep++;
-    }, 3000);
-  }
-
-  stopBGM() {
-    if (this.bgmInterval) {
-      clearInterval(this.bgmInterval);
-      this.bgmInterval = null;
-    }
-  }
-
-  // 기약분수 최종 정답 성공 (화려하고 맑은 실로폰 아르페지오)
-  playSuccessSFX() {
-    this.init();
-    if (this.isMuted || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98]; // 도, 미, 솔, 도, 미, 솔 (C5~G6)
-    notes.forEach((freq, idx) => {
-      this.playTone(freq, 'sine', 0.8, now + idx * 0.08, 0.04);
-    });
-  }
-
-  // 정답이지만 더 약분할 수 있을 때 (경쾌하고 희망찬 더블 노음)
-  playPartialSuccessSFX() {
-    this.init();
-    if (this.isMuted || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    this.playTone(587.33, 'sine', 0.3, now, 0.04);      // 레 (D5)
-    this.playTone(783.99, 'sine', 0.5, now + 0.12, 0.04); // 솔 (G5)
-  }
-
-  // 약분 오류 시 (부드러운 저음 피드백)
-  playIncorrectSFX() {
-    this.init();
-    if (this.isMuted || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    this.playTone(220.00, 'triangle', 0.25, now, 0.05); // 라 (A3)
-    this.playTone(207.65, 'triangle', 0.25, now + 0.1, 0.05); // 라b (Ab3)
-  }
-}
-
-const sound = new SoundManager();
-
-export default function App() {
-  const [level, setLevel] = useState('medium'); // easy, medium, hard
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const [solvedCount, setSolvedCount] = useState(0); // 해결한 누적 문제 수 (무한)
-  
-  // 현재 문제의 분모, 분자
-  const [originNum, setOriginNum] = useState(0);
-  const [originDen, setOriginDen] = useState(0);
-
-  // 약분 단계 추적 상태 배열
-  const [steps, setSteps] = useState([]);
-  
-  // 현재 활성화된 입력창의 값들
-  const [inputNum, setInputNum] = useState('');
-  const [inputDen, setInputDen] = useState('');
-
-  // 메신저 형태의 실시간 대화 기록 목록
-  const [chatHistory, setChatHistory] = useState([
-    { id: 'welcome', sender: 'yakbun', text: "안녕! 나랑 같이 재미있는 약분 연습을 시작해보자! 👋", mood: 'hello' }
-  ]);
-
-  // UI 알림/팝업 상태
-  const [mascotMood, setMascotMood] = useState('hello'); // hello, thinking, happy, hint, soso
-  const [showHint, setShowHint] = useState(false);
-  const [muted, setMuted] = useState(false);
-  
-  // 커스텀 확인 모달들의 노출 여부
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-
-  // 컨페티 효과(축하 폭죽)를 위한 캔버스 레퍼런스 및 스크롤용 레퍼런스
-  const canvasRef = useRef(null);
-  const chatEndRef = useRef(null);
-  const particles = useRef([]);
-
-  // 최대 분모 제한 정의
-  const levelLimits = {
-    easy: { min: 10, max: 24 },
-    medium: { min: 25, max: 60 },
-    hard: { min: 61, max: 100 }
-  };
-
-  // 최대 공약수 함수
-  const getGCD = (a, b) => {
-    return b ? getGCD(b, a % b) : a;
-  };
-
-  // 특정 수의 공약수 리스트 구하기 (1 제외)
-  const getCommonDivisors = (a, b) => {
-    const gcdVal = getGCD(a, b);
-    const divisors = [];
-    for (let i = 2; i <= gcdVal; i++) {
-      if (gcdVal % i === 0) {
-        divisors.push(i);
-      }
-    }
-    return divisors;
-  };
-
-  // 새로운 채팅 메시지가 추가될 때마다 최하단 스크롤
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatHistory]);
-
-  // 채팅 메시지 추가 유틸리티 함수
-  const addChatMessage = (sender, text, mood = 'thinking') => {
-    setChatHistory(prev => [
-      ...prev,
-      { id: Math.random().toString(36).substr(2, 9), sender, text, mood }
-    ]);
-  };
-
-  // 무작위 분수 생성 (약분이 반드시 가능한 분수)
-  const generateFraction = (currentLevel, isNewGame = false) => {
-    const { min, max } = levelLimits[currentLevel || level];
-    let num = 0;
-    let den = 0;
-    let gcdVal = 1;
-
-    // 기약분수가 아니면서(약분 가능), 분수 범위 안의 값 생성
-    while (gcdVal === 1) {
-      den = Math.floor(Math.random() * (max - min + 1)) + min;
-      num = Math.floor(Math.random() * (den - 4)) + 3; 
-      gcdVal = getGCD(num, den);
-    }
-
-    setOriginNum(num);
-    setOriginDen(den);
-    // 최초 단계 세팅
-    setSteps([{ num, den, isOrigin: true }]);
-    setInputNum('');
-    setInputDen('');
-    setShowHint(false);
-    setMascotMood('thinking');
-    
-    // 현재 문제 순번을 동적으로 안내 (solvedCount + 1 번째 문제)
-    const currentQuestionNo = isNewGame ? 1 : solvedCount + 1;
-    const startMsg = `짜잔! ${currentQuestionNo}번째 도전 분수 [ ${num} / ${den} ] 이네! 어떤 공약수로 나누어 볼까?`;
-    
-    if (isNewGame) {
-      setChatHistory([
-        { id: 'start_game', sender: 'yakbun', text: "좋아! 신나는 무한 약분 게임을 시작하자! 🎮", mood: 'happy' },
-        { id: 'question_init', sender: 'yakbun', text: startMsg, mood: 'thinking' }
-      ]);
-    } else {
-      addChatMessage('yakbun', startMsg, 'thinking');
-    }
-  };
-
-  // 게임 시작하기
-  const startGame = () => {
-    sound.init();
-    if (sound.ctx && sound.ctx.state === 'suspended') {
-      sound.ctx.resume();
-    }
-    sound.startBGM();
-    setIsPlaying(true);
-    setScore(0);
-    setSolvedCount(0);
-    generateFraction(level, true);
-  };
-
-  // 볼륨 뮤트 토글
-  const toggleMute = () => {
-    sound.isMuted = !muted;
-    setMuted(!muted);
-  };
-
-  // 난이도 변경 핸들러
-  const handleLevelChange = (newLevel) => {
-    setLevel(newLevel);
-    if (isPlaying) {
-      setLevel(newLevel);
-      setScore(0);
-      setSolvedCount(0);
-      setTimeout(() => generateFraction(newLevel, true), 100);
-    }
-  };
-
-  // 약분 검증 및 제출
-  const handleSubmitReduction = (e) => {
-    e.preventDefault();
-    
-    const uNum = parseInt(inputNum, 10);
-    const uDen = parseInt(inputDen, 10);
-
-    if (isNaN(uNum) || isNaN(uDen) || uNum <= 0 || uDen <= 0) {
-      addChatMessage('yakbun', '💡 분모와 분자에 올바른 숫자를 입력해 줘! 빈칸이 있거나 문자일 순 없어. ✏️', 'soso');
-      sound.playIncorrectSFX();
-      return;
-    }
-
-    // 현재 약분 대상 분수 구하기 (가장 마지막에 완성된 단계 또는 원본 분수)
-    const currentTarget = steps[steps.length - 1];
-    const currN = currentTarget.num;
-    const currD = currentTarget.den;
-
-    // 학생의 도전을 채팅방에 먼저 기록
-    addChatMessage('user', `분모를 ${uDen}, 분자를 ${uNum}으로 약분할래요! 📝`);
-
-    // 1. 같은 값이면 올바른 약분이 아님 (더 작아져야 함)
-    if (uNum === currN && uDen === currD) {
-      setMascotMood('soso');
-      addChatMessage('yakbun', '😅 분모와 분자를 더 작은 수로 나누어야 약분이라고 부른단다! 값을 조금 더 작게 만들어봐!', 'soso');
-      sound.playIncorrectSFX();
-      return;
-    }
-
-    // 2. 비례 성립 여부 확인 (currN / uNum === currD / uDen)
-    const ratioN = currN / uNum;
-    const ratioD = currD / uDen;
-
-    // 나누어 떨어지는 자연수 비율이어야 함
-    if (ratioN === ratioD && Number.isInteger(ratioN) && ratioN > 1) {
-      const divideFactor = ratioN; // 나눈 수 (공약수)
-      const isIrreducible = getGCD(uNum, uDen) === 1;
-
-      if (isIrreducible) {
-        // --- 3. 완벽한 기약분수에 도달함 (최종 성공!) ---
-        const newStep = { num: uNum, den: uDen, factor: divideFactor, isIrreducible: true };
-        const updatedSteps = [...steps, newStep];
-        setSteps(updatedSteps);
-        
-        sound.playSuccessSFX();
-        triggerConfetti();
-        setScore(prev => prev + 10);
-        setSolvedCount(prev => prev + 1); // 해결한 무한 문제 수 누적
-        
-        setMascotMood('happy');
-        addChatMessage('yakbun', `👑 대단해! 완전히 기약분수 [ ${uNum} / ${uDen} ] 을(를) 완성했어! 최종 약분 성공! ⭐`, 'happy');
-
-        // 입력칸 비우기
-        setInputNum('');
-        setInputDen('');
-
-        // 무한 모드이므로 3초 후에 바로 다음 문제 무한 생성
-        setTimeout(() => {
-          generateFraction(level);
-        }, 3000);
-
-      } else {
-        // --- 4. 올바른 약분이나 기약분수가 아님 (중간 단계 추가!) ---
-        const newStep = { num: uNum, den: uDen, factor: divideFactor, isIrreducible: false };
-        setSteps([...steps, newStep]);
-        
-        sound.playPartialSuccessSFX();
-        setMascotMood('happy');
-        addChatMessage('yakbun', `✨ 올바른 약분이야! ${divideFactor}(으)로 완벽히 나눴어. 하지만 아직 기약분수가 아니야! [ ${uNum} / ${uDen} ] 에서 한 번 더 약분해보자!`, 'happy');
-        
-        // 다음 칸 입력을 위해 포커싱 및 입력 리셋
-        setInputNum('');
-        setInputDen('');
-      }
-
-    } else {
-      // --- 5. 잘못된 약분 ---
-      setMascotMood('soso');
-      // 왜 틀렸는지 힌트 제공
-      if (currN % uNum !== 0 || currD % uDen !== 0) {
-        addChatMessage('yakbun', `🧐 음, 분모나 분자가 원래 수에서 딱 나누어 떨어지지 않는 것 같아. 두 수의 공약수를 다시 확인해보자!`, 'soso');
-      } else {
-        addChatMessage('yakbun', `🧐 분모와 분자를 똑같은 숫자로 동시에 나누었는지 차근차근 다시 계산해봐! 할 수 있어!`, 'soso');
-      }
-      sound.playIncorrectSFX();
-    }
-  };
-
-  // 컨페티 효과 가동 (캔버스 파티클 효과)
-  const triggerConfetti = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    canvas.width = canvas.parentElement.clientWidth;
-    canvas.height = canvas.parentElement.clientHeight;
-
-    particles.current = [];
-    const colors = ['#FFC0CB', '#FFD700', '#ADFF2F', '#87CEEB', '#FF69B4', '#FFA500', '#DA70D6'];
-    
-    // 파티클 80개 생성
-    for (let i = 0; i < 80; i++) {
-      particles.current.push({
-        x: canvas.width / 2,
-        y: canvas.height * 0.7,
-        vx: (Math.random() - 0.5) * 12,
-        vy: -Math.random() * 15 - 5,
-        size: Math.random() * 8 + 4,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        gravity: 0.3,
-        alpha: 1,
-        decay: Math.random() * 0.015 + 0.005
-      });
-    }
-
-    let animationId;
-    const update = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      let alive = false;
-      
-      particles.current.forEach(p => {
-        p.vy += p.gravity;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= p.decay;
-        
-        if (p.alpha > 0) {
-          alive = true;
-          ctx.save();
-          ctx.globalAlpha = p.alpha;
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>약분 마스터! 기약분수를 찾아서 (무한 연습모드)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
-      });
+        /* 스크롤바 커스텀 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* 부드러운 애니메이션 선언 */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes scaleUp {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.2s ease-out forwards;
+        }
+        .animate-scale-up {
+            animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-emerald-50 text-slate-800 p-4 flex flex-col items-center justify-between select-none">
 
-      if (alive) {
-        animationId = requestAnimationFrame(update);
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-
-    update();
-  };
-
-  // 컴포넌트가 언마운트될 때 BGM 정지
-  useEffect(() => {
-    return () => {
-      sound.stopBGM();
-    };
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-emerald-50 text-slate-800 font-sans p-4 flex flex-col items-center justify-between selection:bg-emerald-200">
-      
-      {/* 1. 상단 바 (헤더) */}
-      <header className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-emerald-100 p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-md">
-            ÷
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">약분 마스터! <span className="text-emerald-600 text-sm font-semibold">기약분수를 찾아서 (무한 연습모드)</span></h1>
-            <p className="text-xs text-slate-500">초등학교 5학년 수학 개념 다지기</p>
-          </div>
+    <!-- 1. 상단 바 (헤더) -->
+    <header class="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-emerald-100 p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-md">
+                ÷
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">약분 마스터! <span class="text-emerald-600 text-sm font-semibold">기약분수를 찾아서 (무한 연습모드)</span></h1>
+                <p class="text-xs text-slate-500">초등학교 5학년 수학 개념 다지기</p>
+            </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* 난이도 설정 */}
-          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
-            <button 
-              onClick={() => handleLevelChange('easy')} 
-              className={`px-3 py-1.5 rounded-lg transition-all ${level === 'easy' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              쉬움 (분모 24↓)
-            </button>
-            <button 
-              onClick={() => handleLevelChange('medium')} 
-              className={`px-3 py-1.5 rounded-lg transition-all ${level === 'medium' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              보통 (분모 60↓)
-            </button>
-            <button 
-              onClick={() => handleLevelChange('hard')} 
-              className={`px-3 py-1.5 rounded-lg transition-all ${level === 'hard' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              어려움 (분모 100↓)
-            </button>
-          </div>
+        <div class="flex items-center gap-2">
+            <!-- 난이도 설정 라디오 버튼 그룹 -->
+            <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                <button onclick="changeLevel('easy')" id="btn-level-easy" class="px-3 py-1.5 rounded-lg transition-all text-slate-500 hover:text-slate-800">
+                    쉬움 (분모 24↓)
+                </button>
+                <button onclick="changeLevel('medium')" id="btn-level-medium" class="px-3 py-1.5 rounded-lg transition-all bg-white text-emerald-600 shadow-sm">
+                    보통 (분모 60↓)
+                </button>
+                <button onclick="changeLevel('hard')" id="btn-level-hard" class="px-3 py-1.5 rounded-lg transition-all text-slate-500 hover:text-slate-800">
+                    어려움 (분모 100↓)
+                </button>
+            </div>
 
-          {/* 소리 버튼 */}
-          <button 
-            onClick={toggleMute} 
-            className={`p-2.5 rounded-xl border transition-all ${muted ? 'bg-rose-50 text-rose-500 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100'}`}
-            title={muted ? "소리 켜기" : "소리 끄기"}
-          >
-            {muted ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.8.4L6.5 10H5a1 1 0 100 2h1.5l2.7 2.6a1 1 0 001.8-.6V7a1 1 0 00-1-1zm3 4a1 1 0 001-1 3 3 0 00-3-3 1 1 0 100 2 1 1 0 011 1 1 1 0 001 1z" clipRule="evenodd" />
-              </svg>
-            )}
-          </button>
+            <!-- 소리 제어 버튼 -->
+            <button onclick="toggleMute()" id="btn-mute" class="p-2.5 rounded-xl border transition-all bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100" title="소리 켜기/끄기">
+                <svg id="svg-sound-on" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.8.4L6.5 10H5a1 1 0 100 2h1.5l2.7 2.6a1 1 0 001.8-.6V7a1 1 0 00-1-1zm3 4a1 1 0 001-1 3 3 0 00-3-3 1 1 0 100 2 1 1 0 011 1 1 1 0 001 1z" clipRule="evenodd" />
+                </svg>
+                <svg id="svg-sound-off" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+            </button>
         </div>
-      </header>
+    </header>
 
-      {/* 2. 메인 콘텐츠 컨테이너 */}
-      <main className="w-full max-w-5xl flex-grow grid grid-cols-1 md:grid-cols-4 gap-6 relative">
+    <!-- 2. 메인 콘텐츠 컨테이너 -->
+    <main class="w-full max-w-5xl flex-grow grid grid-cols-1 md:grid-cols-4 gap-6 relative min-h-[500px]">
         
-        {/* 컨페티 이펙트 전용 절대 좌표 캔버스 */}
-        <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-50 rounded-2xl w-full h-full" />
+        <!-- 파티클 효과용 전용 캔버스 -->
+        <canvas id="confetti-canvas" class="absolute inset-0 pointer-events-none z-50 rounded-2xl w-full h-full"></canvas>
 
-        {/* 대기중/게임시작 안내 화면 */}
-        {!isPlaying ? (
-          <div className="col-span-4 bg-white border border-emerald-100 rounded-3xl p-8 text-center flex flex-col items-center justify-center shadow-lg my-auto min-h-[450px]">
-            <div className="relative mb-6">
-              <span className="absolute -top-3 -right-3 text-3xl animate-bounce">✏️</span>
-              <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center text-5xl">
-                🍀
-              </div>
+        <!-- 대기 화면 (게임 시작하기 전) -->
+        <div id="welcome-screen" class="col-span-4 bg-white border border-emerald-100 rounded-3xl p-8 text-center flex flex-col items-center justify-center shadow-lg my-auto min-h-[450px]">
+            <div class="relative mb-6">
+                <span class="absolute -top-3 -right-3 text-3xl animate-bounce">✏️</span>
+                <div class="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center text-5xl">
+                    🍀
+                </div>
             </div>
-            
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">무한 약분 연습에 도전해볼까?</h2>
-            <p className="text-slate-600 max-w-lg mb-6 leading-relaxed text-sm">
-              약분은 분모와 분자를 <strong>공약수</strong>로 나누어 간단한 분수로 만드는 수학적 능력이야!<br />
-              이 공간에서는 문제 수의 제한 없이 원하는 만큼 무제한으로 문제를 풀며 성취도를 높일 수 있단다. <br />
-              언제든 기약분수가 될 때까지 아름다운 풀이 과정을 만들어 봐!
+            <h2 class="text-2xl font-bold text-slate-800 mb-2">무한 약분 연습에 도전해볼까?</h2>
+            <p class="text-slate-600 max-w-lg mb-6 leading-relaxed text-sm">
+                약분은 분모와 분자를 <strong>공약수</strong>로 나누어 간단한 분수로 만드는 수학적 능력이야!<br>
+                이 공간에서는 문제 수의 제한 없이 원하는 만큼 무제한으로 문제를 풀며 성취도를 높일 수 있단다. <br>
+                언제든 기약분수가 될 때까지 아름다운 풀이 과정을 만들어 봐!
             </p>
-
-            <button 
-              onClick={startGame}
-              className="px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-lg rounded-2xl shadow-md transform hover:-translate-y-1 transition-all flex items-center gap-2"
-            >
-              🎮 무제한 연습 시작하기
+            <button onclick="startGame()" class="px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-lg rounded-2xl shadow-md transform hover:-translate-y-0.5 transition-all flex items-center gap-2">
+                🎮 무제한 연습 시작하기
             </button>
-          </div>
-        ) : (
-          /* 실제 무한 플레이 보드 */
-          <>
-            {/* 좌측 및 중앙: 약분 풀이 영역 (3칸 점유 - 대화 기록 및 메인 학습판) */}
-            <div className="md:col-span-3 flex flex-col gap-4">
-              
-              {/* 캐릭터 및 대화기록 */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm flex gap-4 items-stretch h-[220px]">
-                {/* 귀여운 약분이 마스코트 */}
-                <div className="flex-shrink-0 flex flex-col items-center justify-center border-r border-slate-100 pr-4">
-                  <div className="w-16 h-16 bg-emerald-50 rounded-2xl border-2 border-emerald-200 flex items-center justify-center text-3xl shadow-sm relative overflow-hidden">
-                    {mascotMood === 'hello' && '👋'}
-                    {mascotMood === 'thinking' && '🧐'}
-                    {mascotMood === 'happy' && '😆'}
-                    {mascotMood === 'hint' && '💡'}
-                    {mascotMood === 'soso' && '😅'}
-                  </div>
-                  <span className="text-xs font-bold text-emerald-700 mt-1">약분이</span>
-                </div>
+        </div>
+
+        <!-- 플레이 화면 (게임 중) -->
+        <div id="game-screen" class="col-span-4 grid grid-cols-1 md:grid-cols-4 gap-6 hidden">
+            <!-- 좌측/중앙 영역: 대화기록 & 화이트보드 (3칸 차지) -->
+            <div class="md:col-span-3 flex flex-col gap-4">
                 
-                {/* 실시간 말풍선 메신저 대화기록 */}
-                <div className="flex-grow overflow-y-auto pr-1 flex flex-col gap-2.5 h-full scroll-smooth" style={{ maxHeight: '188px' }}>
-                  {chatHistory.map((chat) => (
-                    <div 
-                      key={chat.id} 
-                      className={`flex gap-2 items-start ${chat.sender === 'user' ? 'flex-row-reverse' : ''}`}
-                    >
-                      {chat.sender === 'yakbun' ? (
-                        <>
-                          <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs shrink-0 select-none">
-                            🍀
-                          </div>
-                          <div className="relative bg-emerald-50 text-slate-700 border border-emerald-100 text-xs py-2 px-3 rounded-xl max-w-[85%] leading-relaxed shadow-sm">
-                            <div className="absolute -left-1 top-2.5 w-2 h-2 bg-emerald-50 border-l border-b border-emerald-100 transform rotate-45"></div>
-                            {chat.text}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-xs shrink-0 select-none">
-                            🎓
-                          </div>
-                          <div className="relative bg-indigo-600 text-white text-xs py-2 px-3 rounded-xl max-w-[85%] leading-relaxed shadow-sm">
-                            <div className="absolute -right-1 top-2.5 w-2 h-2 bg-indigo-600 transform rotate-45"></div>
-                            {chat.text}
-                          </div>
-                        </>
-                      )}
+                <!-- 캐릭터 말풍선 대화 기록창 -->
+                <div class="bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm flex gap-4 items-stretch h-[220px]">
+                  <div class="flex-shrink-0 flex flex-col items-center justify-center border-r border-slate-100 pr-4">
+                    <div id="mascot-avatar" class="w-16 h-16 bg-emerald-50 rounded-2xl border-2 border-emerald-200 flex items-center justify-center text-3xl shadow-sm relative overflow-hidden">
+                      👋
                     </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
-              </div>
-
-              {/* 약분 칠판/작업 영역 */}
-              <div className="bg-slate-800 text-white rounded-3xl p-6 shadow-md border-4 border-slate-700 flex-grow flex flex-col justify-between min-h-[340px]">
-                
-                {/* 칠판 상단 정보 */}
-                <div className="flex justify-between items-center text-xs text-slate-300 font-semibold mb-4 border-b border-slate-600 pb-2">
-                  <span className="bg-slate-700 px-2.5 py-1 rounded-full text-emerald-400">
-                    🔥 {solvedCount + 1}번째 문제 도전 중
-                  </span>
-                  <div className="flex gap-4">
-                    <span className="text-emerald-300">해결한 문제: {solvedCount}개 ✅</span>
-                    <span className="text-yellow-400">스코어: {score}⭐</span>
-                  </div>
-                </div>
-
-                {/* 흐름형 약분 레이아웃 (약분 히스토리) */}
-                <div className="flex-grow flex flex-wrap items-center justify-center gap-4 py-6">
-                  {steps.map((step, index) => (
-                    <React.Fragment key={index}>
-                      {/* 약분 나눗셈 화살표 기호 */}
-                      {index > 0 && (
-                        <div className="flex flex-col items-center justify-center text-emerald-400">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                          </svg>
-                          <span className="text-[10px] text-yellow-300 bg-slate-700 px-1.5 py-0.5 rounded-full mt-1">÷{step.factor}</span>
-                        </div>
-                      )}
-
-                      {/* 분수 카드 */}
-                      <div className={`p-4 rounded-2xl border flex flex-col items-center min-w-[70px] ${
-                        step.isOrigin 
-                          ? 'bg-slate-700 border-slate-500' 
-                          : step.isIrreducible 
-                            ? 'bg-emerald-900/80 border-emerald-400 shadow-md animate-bounce' 
-                            : 'bg-indigo-950 border-indigo-400'
-                      }`}>
-                        {/* 분자 (Numerator) */}
-                        <span className="text-xl font-bold font-mono tracking-tight text-white mb-1.5">{step.num}</span>
-                        {/* 분수 가로줄 */}
-                        <div className="w-10 h-[3px] bg-slate-300 rounded"></div>
-                        {/* 분모 (Denominator) */}
-                        <span className="text-xl font-bold font-mono tracking-tight text-white mt-1.5">{step.den}</span>
-
-                        {/* 상태 배지 */}
-                        {step.isOrigin && <span className="text-[9px] text-slate-300 mt-2 font-semibold">처음 분수</span>}
-                        {!step.isOrigin && step.isIrreducible && (
-                          <span className="text-[9px] text-emerald-300 mt-2 font-extrabold flex items-center gap-0.5">
-                            ✨ 기약분수
-                          </span>
-                        )}
-                        {!step.isOrigin && !step.isIrreducible && (
-                          <span className="text-[9px] text-indigo-300 mt-2 font-semibold">약분 진행중</span>
-                        )}
-                      </div>
-                    </React.Fragment>
-                  ))}
-
-                  {/* 입력용 빈 분수 카드 (아직 기약분수가 아닐 때에만 노출) */}
-                  {!steps[steps.length - 1].isIrreducible && (
-                    <form onSubmit={handleSubmitReduction} className="flex items-center gap-4">
-                      {/* 입력 유도 화살표 */}
-                      <div className="flex flex-col items-center text-slate-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                        </svg>
-                        <span className="text-[9px] mt-1 font-semibold">어떤 수로?</span>
-                      </div>
-
-                      {/* 입력 보드 (스피너 버튼이 완벽 제거된 순수 텍스트 입력) */}
-                      <div className="bg-slate-700 border-2 border-dashed border-emerald-400 p-4 rounded-2xl flex flex-col items-center">
-                        
-                        {/* 분자 입력 필드 */}
-                        <input 
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={inputNum}
-                          onChange={(e) => setInputNum(e.target.value.replace(/[^0-9]/g, ''))}
-                          placeholder="분자"
-                          className="w-16 h-12 bg-slate-900 text-center text-xl font-bold font-mono text-emerald-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 placeholder:text-xs placeholder:text-slate-600"
-                        />
-                        
-                        {/* 분수 가로줄 */}
-                        <div className="w-12 h-[3px] bg-emerald-400 my-2 rounded"></div>
-                        
-                        {/* 분모 입력 필드 */}
-                        <input 
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={inputDen}
-                          onChange={(e) => setInputDen(e.target.value.replace(/[^0-9]/g, ''))}
-                          placeholder="분모"
-                          className="w-16 h-12 bg-slate-900 text-center text-xl font-bold font-mono text-emerald-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 placeholder:text-xs placeholder:text-slate-600"
-                        />
-                      </div>
-
-                      {/* 확인 단추 */}
-                      <button 
-                        type="submit"
-                        className="px-5 py-6 bg-emerald-500 hover:bg-emerald-600 active:translate-y-0.5 text-white font-bold rounded-2xl shadow-md transition-all flex flex-col items-center justify-center text-sm gap-1"
-                      >
-                        <span>약분</span>
-                        <span>하기!</span>
-                      </button>
-                    </form>
-                  )}
-                </div>
-
-                {/* 칠판 하단 힌트/도움말 알림바 */}
-                <div className="text-center text-xs text-slate-400 mt-2 pt-2 border-t border-slate-700">
-                  ⚠️ 분모와 분자를 동일한 공약수로 완벽히 나누어 새로운 분모/분자를 작성하세요.
-                </div>
-              </div>
-            </div>
-
-            {/* 우측: 학습 도우미 & 사이드바 (1칸 점유 - 레이아웃 고정 및 최적화) */}
-            <div className="flex flex-col gap-4 justify-between h-full">
-              
-              {/* 교육적 서포트: 힌트 보기 토글 카드 (크기가 절대 흔들리지 않는 고정 높이 220px 설계) */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm h-[220px] flex flex-col justify-between shrink-0">
-                <div>
-                  <div className="flex justify-between items-center mb-3 gap-2">
-                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
-                      <span>💡</span> 약수 힌트
-                    </h3>
-                    <button 
-                      onClick={() => {
-                        setShowHint(!showHint);
-                        if(!showHint) {
-                          setMascotMood('hint');
-                          addChatMessage('yakbun', "분모와 분자를 똑같이 나눌 수 있는 친구들을 여기에 몰래 적어놓을게! 🤫", 'hint');
-                        }
-                      }} 
-                      className="text-xs bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-full font-semibold border border-emerald-100 hover:bg-emerald-100 transition-all whitespace-nowrap shrink-0"
-                    >
-                      {showHint ? "닫기" : "열기"}
-                    </button>
+                    <span class="text-xs font-bold text-emerald-700 mt-1">약분이</span>
                   </div>
                   
-                  {showHint ? (
-                    <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed h-[130px] flex flex-col justify-between">
-                      {/* 세로형 분수 표현 레이아웃 적용 */}
-                      <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-100 w-fit">
-                        <span className="font-semibold text-slate-500">현재 분수:</span>
-                        <div className="flex flex-col items-center px-2 py-0.5">
-                          <span className="font-bold text-sm font-mono text-indigo-600 leading-none mb-1">{steps[steps.length - 1].num}</span>
-                          <div className="w-6 h-[1.5px] bg-slate-400"></div>
-                          <span className="font-bold text-sm font-mono text-indigo-600 leading-none mt-1">{steps[steps.length - 1].den}</span>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="font-medium text-slate-500">두 수의 공약수(1 제외):</p>
-                        <p className="mt-1 font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded text-center">
-                          {getCommonDivisors(steps[steps.length - 1].num, steps[steps.length - 1].den).join(', ') || '기약분수입니다!'}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    /* 힌트가 닫혀있어도 높이를 차지하여 레이아웃을 지켜주는 예쁜 대기화면 */
-                    <div className="text-xs text-slate-400 leading-relaxed h-[130px] flex flex-col justify-center items-center text-center bg-slate-50/50 rounded-xl border border-dashed border-slate-200 p-4">
-                      <span className="text-2xl mb-1.5 animate-bounce">❓</span>
-                      <span className="font-semibold text-slate-500">힌트가 숨겨져 있어요</span>
-                      <span className="text-[10px] text-slate-400 mt-1">상단의 '열기' 버튼을 누르면 두 수의 공약수 힌트를 보여줄게요!</span>
-                    </div>
-                  )}
+                  <!-- 스크롤 가능한 대화 기록부 -->
+                  <div id="chat-container" class="flex-grow overflow-y-auto pr-1 flex flex-col gap-2.5 h-full scroll-smooth" style="max-height: 188px;">
+                      <!-- 동적 렌더링 영역 -->
+                  </div>
                 </div>
-              </div>
 
-              {/* 플레이 팁 카드 */}
-              <div className="bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm flex-grow min-h-[120px] flex flex-col justify-center">
-                <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5 mb-2 shrink-0">
-                  <span>📖</span> 약분 마스터 비법
-                </h3>
-                <ul className="text-xs text-slate-500 leading-normal space-y-1.5 list-disc list-inside">
-                  <li>한 번에 가장 큰 공약수로 나누면 바로 기약분수가 돼요!</li>
-                  <li>짝수는 항상 <strong className="text-indigo-600">2</strong>로 나눌 수 있답니다.</li>
-                  <li>끝자리가 0이나 5로 끝나면 <strong className="text-indigo-600">5</strong>로 나누어 보세요.</li>
-                </ul>
-              </div>
+                <!-- 약분 초록 칠판 칠판 시스템 -->
+                <div class="bg-slate-800 text-white rounded-3xl p-6 shadow-md border-4 border-slate-700 flex-grow flex flex-col justify-between min-h-[340px]">
+                    
+                    <!-- 칠판 헤더 정보바 -->
+                    <div class="flex justify-between items-center text-xs text-slate-300 font-semibold mb-4 border-b border-slate-600 pb-2">
+                        <span id="board-question-tag" class="bg-slate-700 px-2.5 py-1 rounded-full text-emerald-400">
+                          🔥 1번째 문제 도전 중
+                        </span>
+                        <div class="flex gap-4">
+                          <span id="board-solved-count" class="text-emerald-300">해결한 문제: 0개 ✅</span>
+                          <span id="board-score" class="text-yellow-400">스코어: 0점 ⭐</span>
+                        </div>
+                    </div>
 
-              {/* 하단 제어 구역 (처음 돌아가기 / 다시 시작하기 버튼 모음) */}
-              <div className="flex flex-col gap-2 shrink-0">
-                {/* 1. 처음 화면으로 돌아가기 버튼 (요청 사항 반영) */}
-                <button 
-                  onClick={() => setShowExitConfirm(true)}
-                  className="w-full py-3 bg-rose-50 text-rose-600 hover:bg-rose-100/60 font-semibold text-xs rounded-xl border border-rose-100 transition-all text-center flex items-center justify-center gap-1 shadow-sm"
-                >
-                  🏠 처음 화면으로 돌아가기
-                </button>
+                    <!-- 단계형 약분 전개 레이아웃 -->
+                    <div id="steps-container" class="flex-grow flex flex-wrap items-center justify-center gap-4 py-6">
+                        <!-- 동적 전개 영역 -->
+                    </div>
 
-                {/* 2. 게임 다시 시작 버튼 */}
-                <button 
-                  onClick={() => setShowResetConfirm(true)}
-                  className="w-full py-3 bg-slate-100 text-slate-600 hover:text-slate-800 font-semibold text-xs rounded-xl border border-slate-200 hover:bg-slate-200/50 transition-all text-center flex items-center justify-center gap-1"
-                >
-                  🔄 점수 초기화하고 다시 풀기
-                </button>
-              </div>
-
+                    <!-- 칠판 하단 힌트/도움말 알림바 -->
+                    <div class="text-center text-xs text-slate-400 mt-2 pt-2 border-t border-slate-700">
+                      ⚠️ 분모와 분자를 동일한 공약수로 완벽히 나누어 새로운 분모/분자를 작성하세요.
+                    </div>
+                </div>
             </div>
-          </>
-        )}
-      </main>
 
-      {/* 3. 하단 푸터 */}
-      <footer className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-emerald-100 p-4 mt-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
-        {isPlaying ? (
-          <div className="w-full flex flex-col md:flex-row items-center justify-between gap-3">
-            {/* 누적 기록 보드 */}
-            <div className="flex items-center gap-4 text-sm font-semibold text-slate-600 w-full md:w-auto">
-              <span className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-100">
-                🍀 오늘 해결한 총 문제 수: <strong className="text-base text-emerald-600 font-bold">{solvedCount}</strong>개
+            <!-- 우측 영역: 학습 서포터 및 내비게이션 (1칸 차지) -->
+            <div class="flex flex-col gap-4 justify-between h-full">
+                
+                <!-- 약수 힌트 카드 (레이아웃 흔들림 없는 고정 높이 220px) -->
+                <div class="bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm h-[220px] flex flex-col justify-between shrink-0">
+                    <div>
+                        <div class="flex justify-between items-center mb-3 gap-2">
+                            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                              <span>💡</span> 약수 힌트
+                            </h3>
+                            <button id="btn-toggle-hint" onclick="toggleHint()" class="text-xs bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-full font-semibold border border-emerald-100 hover:bg-emerald-100 transition-all whitespace-nowrap shrink-0">
+                              열기
+                            </button>
+                        </div>
+                        
+                        <!-- 힌트 세부 내용 혹은 대기 상자 -->
+                        <div id="hint-content-box" class="h-[130px]">
+                            <!-- 스크립트에 의해 동적으로 렌더링 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 플레이 팁 안내판 -->
+                <div class="bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm flex-grow min-h-[120px] flex flex-col justify-center">
+                    <h3 class="font-bold text-sm text-slate-800 flex items-center gap-1.5 mb-2 shrink-0">
+                      <span>📖</span> 약분 마스터 비법
+                    </h3>
+                    <ul class="text-xs text-slate-500 leading-normal space-y-1.5 list-disc list-inside">
+                      <li>한 번에 가장 큰 공약수로 나누면 바로 기약분수가 돼요!</li>
+                      <li>짝수는 항상 <strong class="text-indigo-600">2</strong>로 나눌 수 있답니다.</li>
+                      <li>끝자리가 0이나 5로 끝나면 <strong className="text-indigo-600">5</strong>로 나누어 보세요.</li>
+                    </ul>
+                </div>
+
+                <!-- 하단 제어 구역 (돌아가기 및 초기화 액션) -->
+                <div class="flex flex-col gap-2 shrink-0">
+                    <button onclick="openExitConfirm()" class="w-full py-3 bg-rose-50 text-rose-600 hover:bg-rose-100/60 font-semibold text-xs rounded-xl border border-rose-100 transition-all text-center flex items-center justify-center gap-1 shadow-sm">
+                      🏠 처음 화면으로 돌아가기
+                    </button>
+                    <button onclick="openResetConfirm()" class="w-full py-3 bg-slate-100 text-slate-600 hover:text-slate-800 font-semibold text-xs rounded-xl border border-slate-200 hover:bg-slate-200/50 transition-all text-center flex items-center justify-center gap-1">
+                      🔄 점수 초기화하고 다시 풀기
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 3. 하단 푸터 영역 -->
+    <footer class="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-emerald-100 p-4 mt-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+        <div id="footer-lobby-desc" class="text-center md:text-left text-slate-400 w-full">
+            본 소프트웨어는 초등학교 5학년 수학 교과 과정의 "약분과 통분" 단원을 학습한 뒤 효과적으로 복습할 수 있도록 설계된 교육용 무한 약분 게임입니다.
+        </div>
+        <div id="footer-play-status" class="w-full flex-col md:flex-row items-center justify-between gap-3 hidden">
+            <div class="flex items-center gap-4 text-sm font-semibold text-slate-600 w-full md:w-auto">
+              <span class="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-100">
+                🍀 오늘 해결한 총 문제 수: <strong id="footer-solved-bold" class="text-base text-emerald-600 font-bold">0</strong>개
               </span>
-              <span className="flex items-center gap-1 bg-yellow-50 text-yellow-700 px-3 py-1.5 rounded-xl border border-yellow-100">
-                ⭐ 획득 누적 점수: <strong className="text-base text-yellow-600 font-bold">{score}</strong>점
+              <span class="flex items-center gap-1 bg-yellow-50 text-yellow-700 px-3 py-1.5 rounded-xl border border-yellow-100">
+                ⭐ 획득 누적 점수: <strong id="footer-score-bold" class="text-base text-yellow-600 font-bold">0</strong>점
               </span>
             </div>
-            
-            {/* 플레이 가이드 팁 */}
-            <div className="text-slate-400 text-center md:text-right">
+            <div class="text-slate-400 text-center md:text-right mt-2 md:mt-0">
               무한 모드에서는 제한시간 없이 여유롭게 공부하며 정답 기록을 차곡차곡 모아갈 수 있습니다.
             </div>
-          </div>
-        ) : (
-          <div className="text-center md:text-left text-slate-400 w-full">
-            본 소프트웨어는 초등학교 5학년 수학 교과 과정의 "약분과 통분" 단원을 학습한 뒤 효과적으로 복습할 수 있도록 설계된 교육용 무한 약분 게임입니다.
-          </div>
-        )}
-      </footer>
-
-      {/* 4. [모달 1] 점수 초기화 확인 모달 */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-emerald-50 transform scale-100 transition-all animate-scale-up">
-            <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center text-2xl mb-4">
-              🔄
-            </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">기록을 초기화하고 새로 시작할까요?</h3>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              지금까지 획득한 {score}점과 풀었던 {solvedCount}개 문제의 기록이 지워지며, 1번째 문제부터 신선하게 새로 출발합니다.
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => {
-                  setShowResetConfirm(false);
-                  setScore(0);
-                  setSolvedCount(0);
-                  generateFraction(level, true);
-                }}
-                className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-all text-sm"
-              >
-                예, 새로 시작할래요
-              </button>
-              <button 
-                onClick={() => setShowResetConfirm(false)}
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-all text-sm"
-              >
-                계속 공부할게요
-              </button>
-            </div>
-          </div>
         </div>
-      )}
+    </footer>
 
-      {/* 5. [모달 2] 메인으로 나가기 확인 모달 */}
-      {showExitConfirm && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-rose-50 transform scale-100 transition-all animate-scale-up">
-            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center text-2xl mb-4">
-              🏠
-            </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">처음 화면(홈)으로 돌아갈까요?</h3>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              지금 나가시면 오늘의 기약분수 약분 기록이 모두 완료되며, 멋진 평화 배경음악이 일시 중지됩니다.
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => {
-                  setShowExitConfirm(false);
-                  setIsPlaying(false);
-                  sound.stopBGM();
-                }}
-                className="flex-1 py-3 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all text-sm"
-              >
-                예, 처음으로 나갈래요
-              </button>
-              <button 
-                onClick={() => setShowExitConfirm(false)}
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-all text-sm"
-              >
-                안 나갈래요
-              </button>
-            </div>
-          </div>
+    <!-- 4. [모달 1] 점수 초기화 커스텀 모달 -->
+    <div id="modal-reset" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center z-[100] p-4 animate-fade-in hidden">
+      <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-emerald-50 transform scale-100 transition-all animate-scale-up">
+        <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center text-2xl mb-4">
+          🔄
         </div>
-      )}
-
+        <h3 class="text-lg font-bold text-slate-800 mb-2">기록을 초기화하고 새로 시작할까요?</h3>
+        <p id="modal-reset-desc" class="text-sm text-slate-500 mb-6 leading-relaxed">
+          지금까지 획득한 0점과 풀었던 0개 문제의 기록이 지워지며, 1번째 문제부터 신선하게 새로 출발합니다.
+        </p>
+        <div class="flex gap-3">
+          <button onclick="confirmReset()" class="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-all text-sm">
+            예, 새로 시작할래요
+          </button>
+          <button onclick="closeResetConfirm()" class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-all text-sm">
+            계속 공부할게요
+          </button>
+        </div>
+      </div>
     </div>
-  );
-}
+
+    <!-- 5. [모달 2] 처음으로 나가기 커스텀 모달 -->
+    <div id="modal-exit" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center z-[100] p-4 animate-fade-in hidden">
+      <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-rose-50 transform scale-100 transition-all animate-scale-up">
+        <div class="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center text-2xl mb-4">
+          🏠
+        </div>
+        <h3 class="text-lg font-bold text-slate-800 mb-2">처음 화면(홈)으로 돌아갈까요?</h3>
+        <p class="text-sm text-slate-500 mb-6 leading-relaxed">
+          지금 나가시면 오늘의 기약분수 약분 기록이 모두 완료되며, 멋진 평화 배경음악이 일시 중지됩니다.
+        </p>
+        <div class="flex gap-3">
+          <button onclick="confirmExit()" class="flex-1 py-3 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all text-sm">
+            예, 처음으로 나갈래요
+          </button>
+          <button onclick="closeExitConfirm()" class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-all text-sm">
+            안 나갈래요
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 자바스크립트 엔진 -->
+    <script>
+        // Web Audio API 기동 클래스
+        class SoundManager {
+            constructor() {
+                this.ctx = null;
+                this.bgmInterval = null;
+                this.isMuted = false;
+                this.bgmStep = 0;
+                this.chords = [
+                    [130.81, 164.81, 196.00, 246.94], // Cmaj7
+                    [174.61, 220.00, 261.63, 329.63], // Fmaj7
+                    [196.00, 246.94, 293.66, 329.63], // G6
+                    [130.81, 164.81, 196.00, 246.94], // Cmaj7
+                ];
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playTone(freq, type, duration, startTime, vol) {
+                if (this.isMuted || !this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gainNode = this.ctx.createGain();
+                    osc.connect(gainNode);
+                    gainNode.connect(this.ctx.destination);
+
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, startTime);
+
+                    gainNode.gain.setValueAtTime(0, startTime);
+                    gainNode.gain.linearRampToValueAtTime(vol, startTime + 0.05);
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+                    osc.start(startTime);
+                    osc.stop(startTime + duration);
+                } catch (e) {
+                    console.warn("오디오 재생 실패:", e);
+                }
+            }
+
+            startBGM() {
+                this.init();
+                if (this.bgmInterval) clearInterval(this.bgmInterval);
+                
+                this.bgmInterval = setInterval(() => {
+                    if (this.isMuted || !this.ctx || this.ctx.state === 'suspended') return;
+
+                    const chord = this.chords[this.bgmStep % this.chords.length];
+                    const now = this.ctx.currentTime;
+
+                    // 잔잔한 패드 스타일 저음 아르페지오
+                    chord.forEach((freq, idx) => {
+                        this.playTone(freq, 'triangle', 2.8, now + idx * 0.15, 0.02);
+                    });
+
+                    // 멜로디 톤
+                    if (this.bgmStep % 2 === 0) {
+                        const melody = [523.25, 587.33, 659.25, 783.99, 880.00];
+                        const note = melody[Math.floor(Math.random() * melody.length)];
+                        this.playTone(note, 'sine', 1.8, now + 0.8, 0.015);
+                    }
+
+                    this.bgmStep++;
+                }, 3000);
+            }
+
+            stopBGM() {
+                if (this.bgmInterval) {
+                    clearInterval(this.bgmInterval);
+                    this.bgmInterval = null;
+                }
+            }
+
+            playSuccessSFX() {
+                this.init();
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
+                notes.forEach((freq, idx) => {
+                    this.playTone(freq, 'sine', 0.8, now + idx * 0.08, 0.04);
+                });
+            }
+
+            playPartialSuccessSFX() {
+                this.init();
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                this.playTone(587.33, 'sine', 0.3, now, 0.04);
+                this.playTone(783.99, 'sine', 0.5, now + 0.12, 0.04);
+            }
+
+            playIncorrectSFX() {
+                this.init();
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                this.playTone(220.00, 'triangle', 0.25, now, 0.05);
+                this.playTone(207.65, 'triangle', 0.25, now + 0.1, 0.05);
+            }
+        }
+
+        const sound = new SoundManager();
+
+        // --- 전역 게임 상태 정의 ---
+        let level = 'medium'; // easy, medium, hard
+        let isPlaying = false;
+        let score = 0;
+        let solvedCount = 0;
+        let steps = [];
+        let chatHistory = [];
+        let mascotMood = 'hello';
+        let showHint = false;
+        let muted = false;
+
+        const levelLimits = {
+            easy: { min: 10, max: 24 },
+            medium: { min: 25, max: 60 },
+            hard: { min: 61, max: 100 }
+        };
+
+        const mascotEmojiMap = {
+            hello: '👋',
+            thinking: '🧐',
+            happy: '😆',
+            hint: '💡',
+            soso: '😅'
+        };
+
+        const getGCD = (a, b) => b ? getGCD(b, a % b) : a;
+
+        const getCommonDivisors = (a, b) => {
+            const gcdVal = getGCD(a, b);
+            const divisors = [];
+            for (let i = 2; i <= gcdVal; i++) {
+                if (gcdVal % i === 0) {
+                    divisors.push(i);
+                }
+            }
+            return divisors;
+        };
+
+        // 캐릭터 기분 상태 변경 전용 유틸
+        function setMascot(mood) {
+            mascotMood = mood;
+            const mascotEl = document.getElementById('mascot-avatar');
+            if (mascotEl) {
+                mascotEl.textContent = mascotEmojiMap[mood] || '🍀';
+            }
+        }
+
+        function addChatMessage(sender, text, mood = 'thinking') {
+            const id = Math.random().toString(36).substr(2, 9);
+            chatHistory.push({ id, sender, text, mood });
+            setMascot(mood);
+            renderChat();
+        }
+
+        function renderChat() {
+            const container = document.getElementById('chat-container');
+            if (!container) return;
+
+            container.innerHTML = chatHistory.map(chat => {
+                if (chat.sender === 'yakbun') {
+                    return `
+                        <div class="flex gap-2 items-start justify-start">
+                            <div class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs shrink-0 select-none">
+                                🍀
+                            </div>
+                            <div class="relative bg-emerald-50 text-slate-700 border border-emerald-100 text-xs py-2 px-3 rounded-xl max-w-[85%] leading-relaxed shadow-sm">
+                                <div class="absolute -left-1 top-2.5 w-2 h-2 bg-emerald-50 border-l border-b border-emerald-100 transform rotate-45"></div>
+                                ${chat.text}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="flex gap-2 items-start justify-end flex-row-reverse">
+                            <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-xs shrink-0 select-none">
+                                🎓
+                            </div>
+                            <div class="relative bg-indigo-600 text-white text-xs py-2 px-3 rounded-xl max-w-[85%] leading-relaxed shadow-sm">
+                                <div class="absolute -right-1 top-2.5 w-2 h-2 bg-indigo-600 transform rotate-45"></div>
+                                ${chat.text}
+                            </div>
+                        </div>
+                    `;
+                }
+            }).join('');
+
+            // 자동 스크롤 하단 고정
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
+            }, 50);
+        }
+
+        function renderBoard() {
+            // 헤더 정보 업데이트
+            document.getElementById('board-question-tag').innerText = `🔥 ${solvedCount + 1}번째 문제 도전 중`;
+            document.getElementById('board-solved-count').innerText = `해결한 문제: ${solvedCount}개 ✅`;
+            document.getElementById('board-score').innerText = `스코어: ${score}점 ⭐`;
+
+            document.getElementById('footer-solved-bold').innerText = solvedCount;
+            document.getElementById('footer-score-bold').innerText = score;
+
+            const stepsContainer = document.getElementById('steps-container');
+            if (!stepsContainer) return;
+
+            let htmlContent = '';
+
+            steps.forEach((step, index) => {
+                if (index > 0) {
+                    htmlContent += `
+                        <div class="flex flex-col items-center justify-center text-emerald-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                            </svg>
+                            <span class="text-[10px] text-yellow-300 bg-slate-700 px-1.5 py-0.5 rounded-full mt-1">÷${step.factor}</span>
+                        </div>
+                    `;
+                }
+
+                const cardClass = step.isOrigin 
+                    ? 'bg-slate-700 border-slate-500' 
+                    : step.isIrreducible 
+                        ? 'bg-emerald-900/80 border-emerald-400 shadow-md animate-bounce' 
+                        : 'bg-indigo-950 border-indigo-400';
+
+                const badge = step.isOrigin 
+                    ? '<span class="text-[9px] text-slate-300 mt-2 font-semibold">처음 분수</span>' 
+                    : step.isIrreducible 
+                        ? '<span class="text-[9px] text-emerald-300 mt-2 font-extrabold flex items-center gap-0.5">✨ 기약분수</span>' 
+                        : '<span class="text-[9px] text-indigo-300 mt-2 font-semibold">약분 진행중</span>';
+
+                htmlContent += `
+                    <div class="p-4 rounded-2xl border flex flex-col items-center min-w-[70px] ${cardClass}">
+                        <span class="text-xl font-bold font-mono tracking-tight text-white mb-1.5">${step.num}</span>
+                        <div class="w-10 h-[3px] bg-slate-300 rounded"></div>
+                        <span class="text-xl font-bold font-mono tracking-tight text-white mt-1.5">${step.den}</span>
+                        ${badge}
+                    </div>
+                `;
+            });
+
+            // 아직 마지막 단계가 기약분수가 아니라면 새로운 입력 상자 폼을 생성해 붙임
+            const lastStep = steps[steps.length - 1];
+            if (!lastStep.isIrreducible) {
+                htmlContent += `
+                    <div class="flex items-center gap-4">
+                        <div class="flex flex-col items-center text-slate-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                            </svg>
+                            <span class="text-[9px] mt-1 font-semibold">어떤 수로?</span>
+                        </div>
+
+                        <form onsubmit="handleFormSubmit(event)" class="flex items-center gap-4">
+                            <div class="bg-slate-700 border-2 border-dashed border-emerald-400 p-4 rounded-2xl flex flex-col items-center">
+                                <input 
+                                    type="text" 
+                                    id="input-numerator" 
+                                    inputmode="numeric" 
+                                    pattern="[0-9]*" 
+                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                    placeholder="분자" 
+                                    class="w-16 h-12 bg-slate-900 text-center text-xl font-bold font-mono text-emerald-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 placeholder:text-xs placeholder:text-slate-600"
+                                >
+                                <div class="w-12 h-[3px] bg-emerald-400 my-2 rounded"></div>
+                                <input 
+                                    type="text" 
+                                    id="input-denominator" 
+                                    inputmode="numeric" 
+                                    pattern="[0-9]*" 
+                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                    placeholder="분모" 
+                                    class="w-16 h-12 bg-slate-900 text-center text-xl font-bold font-mono text-emerald-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 placeholder:text-xs placeholder:text-slate-600"
+                                >
+                            </div>
+                            <button type="submit" class="px-5 py-6 bg-emerald-500 hover:bg-emerald-600 active:translate-y-0.5 text-white font-bold rounded-2xl shadow-md transition-all flex flex-col items-center justify-center text-sm gap-1">
+                                <span>약분</span>
+                                <span>하기!</span>
+                            </button>
+                        </form>
+                    </div>
+                `;
+            }
+
+            stepsContainer.innerHTML = htmlContent;
+
+            // 힌트 내용 실시간 업데이트
+            renderHintBox();
+        }
+
+        // 힌트 패널 박스 렌더링
+        function renderHintBox() {
+            const hintBox = document.getElementById('hint-content-box');
+            if (!hintBox) return;
+
+            const current = steps[steps.length - 1];
+
+            if (showHint) {
+                const cds = getCommonDivisors(current.num, current.den);
+                const displayDivisors = cds.length > 0 ? cds.join(', ') : '기약분수입니다!';
+
+                hintBox.className = "text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed h-[130px] flex flex-col justify-between";
+                hintBox.innerHTML = `
+                    <div class="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-100 w-fit">
+                        <span class="font-semibold text-slate-500">현재 분수:</span>
+                        <div class="flex flex-col items-center px-2 py-0.5">
+                          <span class="font-bold text-sm font-mono text-indigo-600 leading-none mb-1">${current.num}</span>
+                          <div class="w-6 h-[1.5px] bg-slate-400"></div>
+                          <span class="font-bold text-sm font-mono text-indigo-600 leading-none mt-1">${current.den}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="font-medium text-slate-500">두 수의 공약수(1 제외):</p>
+                        <p class="mt-1 font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded text-center">
+                          ${displayDivisors}
+                        </p>
+                    </div>
+                `;
+                document.getElementById('btn-toggle-hint').innerText = "닫기";
+            } else {
+                hintBox.className = "text-xs text-slate-400 leading-relaxed h-[130px] flex flex-col justify-center items-center text-center bg-slate-50/50 rounded-xl border border-dashed border-slate-200 p-4";
+                hintBox.innerHTML = `
+                    <span class="text-2xl mb-1.5 animate-bounce">❓</span>
+                    <span class="font-semibold text-slate-500">힌트가 숨겨져 있어요</span>
+                    <span class="text-[10px] text-slate-400 mt-1">상단의 '열기' 버튼을 누르면 두 수의 공약수 힌트를 보여줄게요!</span>
+                `;
+                document.getElementById('btn-toggle-hint').innerText = "열기";
+            }
+        }
+
+        // 힌트 열고 닫기 토글러
+        function toggleHint() {
+            showHint = !showHint;
+            if (showHint) {
+                addChatMessage('yakbun', "분모와 분자를 똑같이 나눌 수 있는 친구들을 여기에 몰래 적어놓을게! 🤫", 'hint');
+            }
+            renderHintBox();
+        }
+
+        // 새로운 약분할 문제 분수 생성
+        function generateFraction(targetLevel, isNewGame = false) {
+            const { min, max } = levelLimits[targetLevel || level];
+            let num = 0;
+            let den = 0;
+            let gcdVal = 1;
+
+            while (gcdVal === 1) {
+                den = Math.floor(Math.random() * (max - min + 1)) + min;
+                num = Math.floor(Math.random() * (den - 4)) + 3;
+                gcdVal = getGCD(num, den);
+            }
+
+            steps = [{ num, den, isOrigin: true }];
+            showHint = false;
+
+            const nextNo = isNewGame ? 1 : solvedCount + 1;
+            const startMsg = `짜잔! ${nextNo}번째 도전 분수 [ ${num} / ${den} ] 이네! 어떤 공약수로 나누어 볼까?`;
+
+            if (isNewGame) {
+                chatHistory = [
+                    { id: 'start_game', sender: 'yakbun', text: "좋아! 신나는 무한 약분 게임을 시작하자! 🎮", mood: 'happy' },
+                    { id: 'question_init', sender: 'yakbun', text: startMsg, mood: 'thinking' }
+                ];
+                setMascot('happy');
+            } else {
+                addChatMessage('yakbun', startMsg, 'thinking');
+            }
+
+            renderChat();
+            renderBoard();
+        }
+
+        // 폼 제출 가로채기 및 로직 처리
+        function handleFormSubmit(e) {
+            e.preventDefault();
+
+            const nInput = document.getElementById('input-numerator');
+            const dInput = document.getElementById('input-denominator');
+
+            if (!nInput || !dInput) return;
+
+            const uNum = parseInt(nInput.value, 10);
+            const uDen = parseInt(dInput.value, 10);
+
+            if (isNaN(uNum) || isNaN(uDen) || uNum <= 0 || uDen <= 0) {
+                addChatMessage('yakbun', '💡 분모와 분자에 올바른 숫자를 입력해 줘! 빈칸이 있거나 문자일 순 없어. ✏️', 'soso');
+                sound.playIncorrectSFX();
+                return;
+            }
+
+            const currentTarget = steps[steps.length - 1];
+            const currN = currentTarget.num;
+            const currD = currentTarget.den;
+
+            // 학생의 제안을 채팅창에 기재
+            addChatMessage('user', `분모를 ${uDen}, 분자를 ${uNum}으로 약분할래요! 📝`);
+
+            // 같은 값 검출 처리
+            if (uNum === currN && uDen === currD) {
+                addChatMessage('yakbun', '😅 분모와 분자를 더 작은 수로 나누어야 약분이라고 부른단다! 값을 조금 더 작게 만들어봐!', 'soso');
+                sound.playIncorrectSFX();
+                return;
+            }
+
+            // 비율 확인 및 정수 분산 체크
+            const ratioN = currN / uNum;
+            const ratioD = currD / uDen;
+
+            if (ratioN === ratioD && Number.isInteger(ratioN) && ratioN > 1) {
+                const divideFactor = ratioN;
+                const isIrreducible = getGCD(uNum, uDen) === 1;
+
+                if (isIrreducible) {
+                    // 최종 기약분수 정답 수락
+                    const newStep = { num: uNum, den: uDen, factor: divideFactor, isIrreducible: true };
+                    steps.push(newStep);
+
+                    sound.playSuccessSFX();
+                    triggerConfetti();
+                    score += 10;
+                    solvedCount += 1;
+
+                    addChatMessage('yakbun', `👑 대단해! 완전히 기약분수 [ ${uNum} / ${uDen} ] 을(를) 완성했어! 최종 약분 성공! ⭐`, 'happy');
+                    renderBoard();
+
+                    // 3초 후 다음 문제 무한 자동 연결
+                    setTimeout(() => {
+                        if (isPlaying) {
+                            generateFraction(level);
+                        }
+                    }, 3000);
+
+                } else {
+                    // 중간 단계 약분 수락
+                    const newStep = { num: uNum, den: uDen, factor: divideFactor, isIrreducible: false };
+                    steps.push(newStep);
+
+                    sound.playPartialSuccessSFX();
+                    addChatMessage('yakbun', `✨ 올바른 약분이야! ${divideFactor}(으)로 완벽히 나눴어. 하지만 아직 기약분수가 아니야! [ ${uNum} / ${uDen} ] 에서 한 번 더 약분해보자!`, 'happy');
+                    renderBoard();
+                }
+            } else {
+                // 잘못된 약분
+                if (currN % uNum !== 0 || currD % uDen !== 0) {
+                    addChatMessage('yakbun', `🧐 음, 분모나 분자가 원래 수에서 딱 나누어 떨어지지 않는 것 같아. 두 수의 공약수를 다시 확인해보자!`, 'soso');
+                } else {
+                    addChatMessage('yakbun', `🧐 분모와 분자를 똑같은 숫자로 동시에 나누었는지 차근차근 다시 계산해봐! 할 수 있어!`, 'soso');
+                }
+                sound.playIncorrectSFX();
+            }
+        }
+
+        function triggerConfetti() {
+            const canvas = document.getElementById('confetti-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const parent = canvas.parentElement;
+            canvas.width = parent.clientWidth;
+            canvas.height = parent.clientHeight;
+
+            particles.length = 0;
+            const colors = ['#FFC0CB', '#FFD700', '#ADFF2F', '#87CEEB', '#FF69B4', '#FFA500', '#DA70D6'];
+            
+            for (let i = 0; i < 80; i++) {
+                particles.push({
+                    x: canvas.width / 2,
+                    y: canvas.height * 0.7,
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: -Math.random() * 15 - 5,
+                    size: Math.random() * 8 + 4,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    gravity: 0.3,
+                    alpha: 1,
+                    decay: Math.random() * 0.015 + 0.005
+                });
+            }
+
+            function update() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                let alive = false;
+                
+                particles.forEach(p => {
+                    p.vy += p.gravity;
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.alpha -= p.decay;
+                    
+                    if (p.alpha > 0) {
+                        alive = true;
+                        ctx.save();
+                        ctx.globalAlpha = p.alpha;
+                        ctx.fillStyle = p.color;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                });
+
+                if (alive) {
+                    requestAnimationFrame(update);
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+
+            update();
+        }
+
+        // 게임 상태 스위처 및 UI 모드 갱신
+        function updateScreenState() {
+            const welcome = document.getElementById('welcome-screen');
+            const game = document.getElementById('game-screen');
+            const footerLobby = document.getElementById('footer-lobby-desc');
+            const footerPlay = document.getElementById('footer-play-status');
+
+            if (isPlaying) {
+                welcome.classList.add('hidden');
+                game.classList.remove('hidden');
+                footerLobby.classList.add('hidden');
+                footerPlay.classList.remove('hidden');
+                footerPlay.classList.add('flex');
+            } else {
+                welcome.classList.remove('hidden');
+                game.classList.add('hidden');
+                footerLobby.classList.remove('hidden');
+                footerPlay.classList.add('hidden');
+                footerPlay.classList.remove('flex');
+            }
+        }
+
+        // 시작 버튼 이벤트
+        function startGame() {
+            sound.init();
+            if (sound.ctx && sound.ctx.state === 'suspended') {
+                sound.ctx.resume();
+            }
+            sound.startBGM();
+            isPlaying = true;
+            score = 0;
+            solvedCount = 0;
+            updateScreenState();
+            generateFraction(level, true);
+        }
+
+        // 레벨 변경
+        function changeLevel(newLevel) {
+            level = newLevel;
+
+            ['easy', 'medium', 'hard'].forEach(l => {
+                const btn = document.getElementById(`btn-level-${l}`);
+                if (l === newLevel) {
+                    btn.className = "px-3 py-1.5 rounded-lg transition-all bg-white text-emerald-600 shadow-sm";
+                } else {
+                    btn.className = "px-3 py-1.5 rounded-lg transition-all text-slate-500 hover:text-slate-800";
+                }
+            });
+
+            if (isPlaying) {
+                score = 0;
+                solvedCount = 0;
+                generateFraction(level, true);
+            }
+        }
+
+        // 볼륨 소리 켜고 끄기 토글
+        function toggleMute() {
+            muted = !muted;
+            sound.isMuted = muted;
+
+            const onSvg = document.getElementById('svg-sound-on');
+            const offSvg = document.getElementById('svg-sound-off');
+            const btn = document.getElementById('btn-mute');
+
+            if (muted) {
+                onSvg.classList.add('hidden');
+                offSvg.classList.remove('hidden');
+                btn.className = "p-2.5 rounded-xl border transition-all bg-rose-50 text-rose-500 border-rose-100";
+            } else {
+                onSvg.classList.remove('hidden');
+                offSvg.classList.add('hidden');
+                btn.className = "p-2.5 rounded-xl border transition-all bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100";
+            }
+        }
+
+        // --- 확인용 모달 연계 기믹 ---
+        function openResetConfirm() {
+            document.getElementById('modal-reset-desc').innerText = `지금까지 획득한 ${score}점과 풀었던 ${solvedCount}개 문제의 기록이 지워지며, 1번째 문제부터 신선하게 새로 출발합니다.`;
+            const modal = document.getElementById('modal-reset');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeResetConfirm() {
+            const modal = document.getElementById('modal-reset');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmReset() {
+            closeResetConfirm();
+            score = 0;
+            solvedCount = 0;
+            generateFraction(level, true);
+        }
+
+        function openExitConfirm() {
+            const modal = document.getElementById('modal-exit');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeExitConfirm() {
+            const modal = document.getElementById('modal-exit');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmExit() {
+            closeExitConfirm();
+            isPlaying = false;
+            sound.stopBGM();
+            updateScreenState();
+        }
+
+        // 화면 리사이즈 시 폭죽 캔버스 조율
+        window.addEventListener('resize', () => {
+            const canvas = document.getElementById('confetti-canvas');
+            if (canvas && canvas.parentElement) {
+                canvas.width = canvas.parentElement.clientWidth;
+                canvas.height = canvas.parentElement.clientHeight;
+            }
+        });
+    </script>
+</body>
+</html>
