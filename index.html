@@ -26,7 +26,7 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
-        /* 부드러운 애니메이션 선언 */
+        /* 애니메이션 선언 */
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -48,13 +48,13 @@
     <!-- 1. 상단 바 (헤더) -->
     <header class="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-emerald-100 p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-md">
-                ÷
-            </div>
-            <div>
-                <h1 class="text-xl font-bold text-slate-800">약분 마스터! <span class="text-emerald-600 text-sm font-semibold">기약분수를 찾아서 (무한 연습모드)</span></h1>
-                <p class="text-xs text-slate-500">초등학교 5학년 수학 개념 다지기</p>
-            </div>
+          <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-md">
+            ÷
+          </div>
+          <div>
+            <h1 class="text-xl font-bold text-slate-800">약분 마스터! <span class="text-emerald-600 text-sm font-semibold">기약분수를 찾아서 (무한 연습모드)</span></h1>
+            <p class="text-xs text-slate-500">초등학교 5학년 수학 개념 다지기</p>
+          </div>
         </div>
 
         <div class="flex items-center gap-2">
@@ -74,10 +74,10 @@
             <!-- 소리 제어 버튼 -->
             <button onclick="toggleMute()" id="btn-mute" class="p-2.5 rounded-xl border transition-all bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100" title="소리 켜기/끄기">
                 <svg id="svg-sound-on" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.8.4L6.5 10H5a1 1 0 100 2h1.5l2.7 2.6a1 1 0 001.8-.6V7a1 1 0 00-1-1zm3 4a1 1 0 001-1 3 3 0 00-3-3 1 1 0 100 2 1 1 0 011 1 1 1 0 001 1z" clipRule="evenodd" />
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.8.4L6.5 10H5a1 1 0 100 2h1.5l2.7 2.6a1 1 0 001.8-.6V7a1 1 0 00-1-1zm3 4a1 1 0 001-1 3 3 0 00-3-3 1 1 0 100 2 1 1 0 011 1 1 1 0 001 1z" clip-rule="evenodd" />
                 </svg>
                 <svg id="svg-sound-off" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                    <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd" />
                 </svg>
             </button>
         </div>
@@ -184,7 +184,7 @@
                     <ul class="text-xs text-slate-500 leading-normal space-y-1.5 list-disc list-inside">
                       <li>한 번에 가장 큰 공약수로 나누면 바로 기약분수가 돼요!</li>
                       <li>짝수는 항상 <strong class="text-indigo-600">2</strong>로 나눌 수 있답니다.</li>
-                      <li>끝자리가 0이나 5로 끝나면 <strong className="text-indigo-600">5</strong>로 나누어 보세요.</li>
+                      <li>끝자리가 0이나 5로 끝나면 <strong class="text-indigo-600">5</strong>로 나누어 보세요.</li>
                     </ul>
                 </div>
 
@@ -380,6 +380,8 @@
         let mascotMood = 'hello';
         let showHint = false;
         let muted = false;
+        let particles = []; // 파티클 변수를 글로벌 스코프에 안전하게 선언
+        let autoTransitionTimer = null; // 자동 다음문제 타이머 스토리지
 
         const levelLimits = {
             easy: { min: 10, max: 24 },
@@ -551,6 +553,22 @@
                         </form>
                     </div>
                 `;
+            } else {
+                // 기약분수 정답 달성 상태일 때: "다음 문제 바로가기" 단추 노출
+                htmlContent += `
+                    <div class="flex items-center gap-4 animate-scale-up">
+                        <div class="flex flex-col items-center text-emerald-300">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 animate-bounce text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                            </svg>
+                            <span class="text-xs font-semibold text-emerald-300 mt-1">자동 전환 중...</span>
+                        </div>
+                        <button onclick="skipToNextFraction()" class="px-6 py-6 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:translate-y-0.5 text-white font-extrabold rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center text-sm gap-1 border-2 border-emerald-300">
+                            <span>🎮 다음 문제</span>
+                            <span>바로 풀기!</span>
+                        </button>
+                    </div>
+                `;
             }
 
             stepsContainer.innerHTML = htmlContent;
@@ -582,7 +600,7 @@
                     </div>
                     <div>
                         <p class="font-medium text-slate-500">두 수의 공약수(1 제외):</p>
-                        <p class="mt-1 font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded text-center">
+                        <p class="mt-1 font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded text-center font-mono">
                           ${displayDivisors}
                         </p>
                     </div>
@@ -610,6 +628,12 @@
 
         // 새로운 약분할 문제 분수 생성
         function generateFraction(targetLevel, isNewGame = false) {
+            // 실행 중이던 자동 연결 타이머가 있다면 중단
+            if (autoTransitionTimer) {
+                clearTimeout(autoTransitionTimer);
+                autoTransitionTimer = null;
+            }
+
             const { min, max } = levelLimits[targetLevel || level];
             let num = 0;
             let den = 0;
@@ -639,6 +663,15 @@
 
             renderChat();
             renderBoard();
+        }
+
+        // 바로 다음 문제로 스킵하는 수동 액션 함수
+        function skipToNextFraction() {
+            if (autoTransitionTimer) {
+                clearTimeout(autoTransitionTimer);
+                autoTransitionTimer = null;
+            }
+            generateFraction(level);
         }
 
         // 폼 제출 가로채기 및 로직 처리
@@ -694,12 +727,12 @@
                     addChatMessage('yakbun', `👑 대단해! 완전히 기약분수 [ ${uNum} / ${uDen} ] 을(를) 완성했어! 최종 약분 성공! ⭐`, 'happy');
                     renderBoard();
 
-                    // 3초 후 다음 문제 무한 자동 연결
-                    setTimeout(() => {
+                    // 무한 모드: 2.5초 후 다음 문제 무한 자동 연결 (사용자가 즉시 누를 수도 있음)
+                    autoTransitionTimer = setTimeout(() => {
                         if (isPlaying) {
                             generateFraction(level);
                         }
-                    }, 3000);
+                    }, 2500);
 
                 } else {
                     // 중간 단계 약분 수락
@@ -729,7 +762,7 @@
             canvas.width = parent.clientWidth;
             canvas.height = parent.clientHeight;
 
-            particles.length = 0;
+            particles.length = 0; // 글로벌 선언된 particles 안전 초기화
             const colors = ['#FFC0CB', '#FFD700', '#ADFF2F', '#87CEEB', '#FF69B4', '#FFA500', '#DA70D6'];
             
             for (let i = 0; i < 80; i++) {
@@ -891,6 +924,10 @@
             closeExitConfirm();
             isPlaying = false;
             sound.stopBGM();
+            if (autoTransitionTimer) {
+                clearTimeout(autoTransitionTimer);
+                autoTransitionTimer = null;
+            }
             updateScreenState();
         }
 
